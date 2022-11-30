@@ -153,6 +153,8 @@ var _import_send_signal = false
 var _import_stop = false
 var _import_thread = Thread.new()
 
+var regexes = {}
+
 # Keep track of which locales we've translated to, so we don't re-parse them.
 var _tr_locales = []
 
@@ -387,6 +389,7 @@ func _process(_delta):
 # _userdata: Ignored, required for it to be run by a thread.
 func _import_all(_userdata) -> void:
 	print("START")
+	regexes.clear()
 	var start_time = OS.get_ticks_msec()
 	var catalog = _catalog_assets()
 	
@@ -481,6 +484,7 @@ func _import_all(_userdata) -> void:
 				else:
 					push_error("Failed to load '%s' (error %d)!" % [stacks_file_path, err])
 	
+	regexes.clear()
 	print("FINISHED: ", OS.get_ticks_msec() - start_time)
 	_send_completed_signal(catalog["asset_dir_exists"])
 
@@ -762,42 +766,50 @@ func _get_asset_dir(pack: String, type_dir: String) -> Directory:
 	
 	return dir
 
+# Custom sorter class for _get_file_config_value
+# Sorts by string length. Largest to smallest
 class AssetDBSorter:
-	static func sort_length(a, b):
-		if a.length() < b.length():
+	static func sort_length(a: String, b: String):
+		if a.length() > b.length():
 			return true
 		return false
 
-# TODO fix desc
-# Get an asset's config value. It will search the config file with wildcards
-# from right to left (e.g. Card -> Car* -> Ca* -> C* -> *).
+# Get an asset's config value. It will search the config file with wildcards.
+# Wildcards can be at the beginng and/or end.
+# E.g.: *Card.png, Card*, *Card*
 # Returns: The config value. If it doesn' exists, returns default.
 # config: The config file to query.
-# section: The section to query (this is the value that is wildcarded).
+# query: The section to query (this is the value that is wildcarded).
 # key: The key to query.
 # default: The default value to return if the value doesn't exist.
-func _get_file_config_value(config: ConfigFile, search: String, key: String, default):
+func _get_file_config_value(config: ConfigFile, query: String, key: String, default):
 	var found = ["*"]
 	var sections = config.get_sections()
-	var regex = RegEx.new()
+	
 	for section in sections:
-		# REGEX version: ~ 405ms
-		# will find: all *, eg. My*Card, My*, Card*, My*Card*2
-		regex.compile(section.replace('*','.*'))
-		var result = regex.search(search)
-		if result:
+		if section == "*": continue
+		# REGEX version: ~ 330ms
+		if not section in regexes:
+			var regex = RegEx.new()
+			regex.compile(section.replace('*','.*'))
+			regexes[section] = regex
+		if regexes[section].search(query):
 			found.append(section)
-		# FIND version: ~ 260ms
-		# will find only: Card, *rd, Ca* (right->left, left->right)
-		if section.replace("*","") in search:
-			found.append(section)
-		# OLD version: ~ 305ms
+		# FIND version: ~ 280ms
+		var wildcard_at_front = section.begins_with("*")
+		var wildcard_at_end = section.ends_with("*")
+		var search_term = section.replace("*","")
+		if ((search_term == query) \
+			or (wildcard_at_front and query.ends_with(search_term)) \
+			or (wildcard_at_end and query.begins_with(search_term)) \
+			or (wildcard_at_front and wildcard_at_end and search_term in query)):
+				found.append(section)
 	
 	found.sort_custom(AssetDBSorter, "sort_length")
-	var value = default
 	for f in found:
-		value = config.get_value(f, key, value)
-	return value
+		if config.has_section_key(f, key):
+			return config.get_value(f, key, default)
+	return default
 
 # Import an asset. If it has already been imported before, and it's contents
 # have not changed, it is not reimported, but the piece entry is still added to
