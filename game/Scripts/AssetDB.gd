@@ -386,6 +386,8 @@ func _process(_delta):
 # Import assets from all directories.
 # _userdata: Ignored, required for it to be run by a thread.
 func _import_all(_userdata) -> void:
+	print("START")
+	var start_time = OS.get_ticks_msec()
 	var catalog = _catalog_assets()
 	
 	var files_imported = 0
@@ -479,6 +481,7 @@ func _import_all(_userdata) -> void:
 				else:
 					push_error("Failed to load '%s' (error %d)!" % [stacks_file_path, err])
 	
+	print("FINISHED: ", OS.get_ticks_msec() - start_time)
 	_send_completed_signal(catalog["asset_dir_exists"])
 
 # Add an asset entry to the database.
@@ -759,6 +762,13 @@ func _get_asset_dir(pack: String, type_dir: String) -> Directory:
 	
 	return dir
 
+class AssetDBSorter:
+	static func sort_length(a, b):
+		if a.length() < b.length():
+			return true
+		return false
+
+# TODO fix desc
 # Get an asset's config value. It will search the config file with wildcards
 # from right to left (e.g. Card -> Car* -> Ca* -> C* -> *).
 # Returns: The config value. If it doesn' exists, returns default.
@@ -766,23 +776,28 @@ func _get_asset_dir(pack: String, type_dir: String) -> Directory:
 # section: The section to query (this is the value that is wildcarded).
 # key: The key to query.
 # default: The default value to return if the value doesn't exist.
-func _get_file_config_value(config: ConfigFile, section: String, key: String, default):
-	var next_section = section
+func _get_file_config_value(config: ConfigFile, search: String, key: String, default):
+	var found = ["*"]
+	var sections = config.get_sections()
+	var regex = RegEx.new()
+	for section in sections:
+		# REGEX version: ~ 405ms
+		# will find: all *, eg. My*Card, My*, Card*, My*Card*2
+		regex.compile(section.replace('*','.*'))
+		var result = regex.search(search)
+		if result:
+			found.append(section)
+		# FIND version: ~ 260ms
+		# will find only: Card, *rd, Ca* (right->left, left->right)
+		if section.replace("*","") in search:
+			found.append(section)
+		# OLD version: ~ 305ms
 	
-	if section.length() == 0:
-		return default
-	
-	var take_away = 1
-	if section.ends_with("*"):
-		take_away += 1
-	
-	var new_len = max(section.length() - take_away, 0)
-	
-	next_section = section.substr(0, new_len)
-	if section != "*":
-		next_section += "*"
-	
-	return config.get_value(section, key, _get_file_config_value(config, next_section, key, default))
+	found.sort_custom(AssetDBSorter, "sort_length")
+	var value = default
+	for f in found:
+		value = config.get_value(f, key, value)
+	return value
 
 # Import an asset. If it has already been imported before, and it's contents
 # have not changed, it is not reimported, but the piece entry is still added to
