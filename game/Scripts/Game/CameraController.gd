@@ -475,8 +475,7 @@ func _process(delta):
 		if _piece_mouse_is_over_time > hand_preview_delay:
 			if _piece_mouse_is_over is Card:
 				if _piece_mouse_is_over.over_hands == [ get_tree().get_network_unique_id() ]:
-					if not _selected_pieces.has(_piece_mouse_is_over):
-						_hand_preview_rect.visible = true
+					_hand_preview_rect.visible = true
 	
 	if _hand_preview_rect.visible:
 		var card_entry = _piece_mouse_is_over.piece_entry
